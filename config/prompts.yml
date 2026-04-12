@@ -1,0 +1,5 @@
+# 包含了项目中所使用的提示模板的路径。
+# 这些提示模板用于指导模型在不同阶段的生成过程，包括主提示、RAG提示和报告提示。
+main_prompt_path : prompts/main_prompt.txt
+rag_summarize_prompt_path : prompts/rag_summarize.txt
+report_prompt_path : prompts/report_prompt.txt
