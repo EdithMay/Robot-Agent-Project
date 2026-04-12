@@ -1,0 +1,49 @@
+'''
+从配置文件（YAML 格式的 .yml）里读取配置，
+并返回 Python 对象
+类似于⬇️
+model:
+  provider: ollama
+  name: qwen2.5:7b
+  temperature: 0.2
+
+chroma:
+  persist_directory: chromdb
+  collection: robot_qa
+
+top_k: 4
+'''
+import yaml
+from agent_project.utils.path_tool import get_abs_path
+
+def load_rag_config(config:str = get_abs_path("config/rag.yml"),encoding:str = "utf-8"):
+    with open(config, "r", encoding=encoding) as f:
+        #yaml.load()函数用于从文件中加载 YAML 数据，并将其转换为 Python 对象。
+        # Loader=yaml.FullLoader 参数指定使用 FullLoader 来解析 YAML 数据，这是一种安全的加载器，可以防止执行任意代码。
+        return yaml.load(f, Loader=yaml.FullLoader)
+
+def load_chroma_config(config:str = get_abs_path("config/chroma.yml"),encoding:str = "utf-8"):
+    with open(config, "r", encoding=encoding) as f:
+        #yaml.load()函数用于从文件中加载 YAML 数据，并将其转换为 Python 对象。
+        # Loader=yaml.FullLoader 参数指定使用 FullLoader 来解析 YAML 数据，这是一种安全的加载器，可以防止执行任意代码。
+        return yaml.load(f, Loader=yaml.FullLoader)
+
+def load_prompts_config(config:str = get_abs_path("config/prompts.yml"),encoding:str = "utf-8"):
+    with open(config, "r", encoding=encoding) as f:
+        #yaml.load()函数用于从文件中加载 YAML 数据，并将其转换为 Python 对象。
+        # Loader=yaml.FullLoader 参数指定使用 FullLoader 来解析 YAML 数据，这是一种安全的加载器，可以防止执行任意代码。
+        return yaml.load(f, Loader=yaml.FullLoader)
+
+def load_agent_config(config:str = get_abs_path("config/agent.yml"),encoding:str = "utf-8"):
+    with open(config, "r", encoding=encoding) as f:
+        #yaml.load()函数用于从文件中加载 YAML 数据，并将其转换为 Python 对象。
+        # Loader=yaml.FullLoader 参数指定使用 FullLoader 来解析 YAML 数据，这是一种安全的加载器，可以防止执行任意代码。
+        return yaml.load(f, Loader=yaml.FullLoader)
+
+rag_conf = load_rag_config()
+chroma_conf = load_chroma_config()
+prompt_conf = load_prompts_config()
+agent_conf = load_agent_config()
+
+if __name__ == '__main__':
+    print(rag_conf["chat_model_name"])
