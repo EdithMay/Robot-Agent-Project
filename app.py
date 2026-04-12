@@ -27,7 +27,7 @@ def save_history(messages):
 # ==========================================
 # 1. 页面基本配置与粉色主题 CSS 注入
 # ==========================================
-st.set_page_config(page_title="🌸 RAG 智能助手", page_icon="🌸", layout="centered")
+st.set_page_config(page_title="🌸 扫地机器人智能助手", page_icon="🌸", layout="centered")
 
 # 使用 Markdown 注入自定义 CSS 实现粉色主题
 st.markdown("""
@@ -50,8 +50,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 页面标题
-st.title("🌸 专属 RAG 智能助手")
-st.caption("基于 LangGraph 与大模型构建的业务分析助手")
+st.title("🌸 专属扫地机器人智能助手")
+st.caption("您的私人机器分析助手")
 
 # ==========================================
 # 2. 初始化 Session State (状态保持)
@@ -106,7 +106,9 @@ if prompt := st.chat_input("想问点什么？(例如：生成我的使用报告
         message_placeholder.markdown("✨ *智能体正在努力思考与检索中...*")
         try:
             # 开始流式输出，直接覆盖前面的思考状态
-            for chunk in st.session_state.agent.execute_stream(st.session_state.messages):
+            #将新问题追加到列表中后，将包含了所有历史对话的完整列表直接传递给了Agent
+            recent_history = st.session_state.messages[-10:]#只保留最近的 10 条（5 轮）对话
+            for chunk in st.session_state.agent.execute_stream(recent_history):
                 full_response = chunk
                 # 加上闪烁光标 ▌ 增强流式打字感
                 message_placeholder.markdown(full_response + " ▌")
