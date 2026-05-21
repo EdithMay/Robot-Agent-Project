@@ -5,12 +5,15 @@ import os.path
 
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
+from langchain_core.documents import Document
+from langchain_classic.retrievers  import EnsembleRetriever
+from langchain_community.retrievers import BM25Retriever
 from agent_project.utils.config_handler import chroma_conf
 from agent_project.model.factory import embedding_model,chat_model
 from agent_project.utils.path_tool import get_abs_path
 from agent_project.utils.file_handler import pdf_loader, txt_loader, get_file_md5_hex, listdir_with_allowed_type
 from agent_project.utils.logger_handler import logger
+from agent_project.utils.mysql_handler import check_document_exists, add_document_record
 
 class VectorStoreService:
     '''
@@ -31,34 +34,44 @@ class VectorStoreService:
         )
     def get_retriever(self):
         '''
-        返回一个 LangChain retriever：上层问问题时，它会：
-        把 query 做 embedding
-        去向量库做相似度搜索
-        返回 Top-K 个最相关的文本块（k 来自配置
-        :return:
+            返回一个混合检索器 (Ensemble Retriever)：
+            结合了 Chroma 向量检索 (语义匹配) 和 BM25 (关键词字面匹配)
         '''
-        # 返回一个检索器对象，可以根据指定的top_k参数来控制返回的结果数量。
-        return self.vector_store.as_retriever(search_kwargs={"k": chroma_conf["k"]})
+        # 1. 初始化原有的向量检索器
+        vector_retriever = self.vector_store.as_retriever(
+            search_kwargs={"k": chroma_conf["k"]}
+        )
+        # 2. 获取 Chroma 库中现有的所有数据
+        db_data = self.vector_store.get()
+        docs = db_data.get('documents', [])
+        metadatas = db_data.get('metadatas', [])
+        # 如果库是空的，直接返回向量检索器（防报错）
+        if not docs:
+            logger.warning("[混合检索] 向量库目前为空，降级为纯向量检索。")
+            return vector_retriever
+        # 3. 将取出的纯文本数据重新组装成 LangChain 的 Document 对象
+        bm25_docs = [
+                Document(page_content=doc, metadata=meta)
+                for doc, meta in zip(docs, metadatas)
+            ]
+        # 4. 初始化 BM25 检索器
+        bm25_retriever = BM25Retriever.from_documents(bm25_docs)
+        bm25_retriever.k = chroma_conf["k"]  # 保证 BM25 召回的数量与向量召回一致
+        # 5. 组合成混合检索器
+        # weights=[0.5, 0.5] 表示语义和关键词的权重各占一半。
+        # 如果发现报错代码(如Err-01)搜不准，可以把 BM25 的权重调高，如 [0.7, 0.3]
+        ensemble_retriever = EnsembleRetriever(
+            retrievers=[bm25_retriever, vector_retriever],
+            weights=[0.5, 0.5]
+        )
+        logger.info("[混合检索] EnsembleRetriever (BM25 + Chroma) 初始化成功")
+        return ensemble_retriever
 
     def load_document(self):
         '''
         加载文档读取数据，然后将这些数据转为向量添加到向量存储中。
         :return:
         '''
-        def check_mad5_hex(md5_for_check:str):
-            if not  os.path.exists(get_abs_path(chroma_conf["md5_hex_store"])):
-                # 如果存储MD5值的文件不存在，就创建一个空文件来存储MD5值，并返回False，表示这个文件没有被处理过。
-                open(get_abs_path(chroma_conf["md5_hex_store"]),"w",encoding="utf-8").close()
-                return False
-            with open(get_abs_path(chroma_conf["md5_hex_store"]),"r",encoding="utf-8") as f:
-                for line in f.readlines():
-                    if line.strip() == md5_for_check:
-                        return True #如果在文件中找到匹配的MD5值，代表这个文件以及被处理过
-
-        def save_md5_hex(md5_hex:str):
-            with open(get_abs_path(chroma_conf["md5_hex_store"]),"a",encoding="utf-8") as f:
-                f.write(md5_hex + "\n")#把新的MD5值追加到文件中，每个MD5值占一行
-
         def get_file_document(read_path:str):
             #根据文件的扩展名来判断文件类型，并调用相应的加载函数来读取文件内容。
             if read_path.endswith(".pdf"):
@@ -73,30 +86,75 @@ class VectorStoreService:
         )
         #2.计算文件的MD5值
         for path in allowed_files_path:
-
+            # 计算文件 MD5
             md5_hex = get_file_md5_hex(path)
-            #3.检查md5是否已存在
-            if check_mad5_hex(md5_hex):
-                logger.info(f"[向量存储]文件{path}已处理过，跳过加载")
+            # 获取单纯的文件名，例如 "user_manual.pdf"
+            file_name = os.path.basename(path)
+
+            # 👇 核心改造：使用 MySQL 检查文件是否已存在
+            if check_document_exists(md5_hex):
+                logger.info(f"[向量存储] 文件 {file_name} 已在数据库中记录，跳过加载")
                 continue
+
             try:
-                #4.通过get_file_document加载文件内容
                 documents = get_file_document(path)
                 if not documents:
-                    logger.warning(f"[向量存储]文件{path}不存在有效内容，跳过加载")
+                    logger.warning(f"[向量存储] 文件 {path} 不存在有效内容，跳过加载")
                     continue
-                #5.使用文本分割工具将加载的文档内容进行分割，得到一个包含多个文本块的列表。
+
                 split_document = self.splitter.split_documents(documents)
-                if  not split_document:
-                    logger.warning(f"[向量存储]文件{path}分割后没有得到有效文本块，跳过加载")
+                if not split_document:
+                    logger.warning(f"[向量存储] 文件 {path} 分割后没有得到有效文本块，跳过加载")
                     continue
-                #6.将分割好的文本块存入向量库
+
                 self.vector_store.add_documents(split_document)
-                #7.将文件的MD5值保存到存储MD5值的文件中，以便下次加载时进行检查，避免重复处理同一个文件。
-                save_md5_hex(md5_hex)
+
+                # 👇 核心改造：存入 Chroma 成功后，将元数据写入 MySQL
+                add_document_record(file_name, md5_hex, status="processed")
+                logger.info(f"[向量存储] 文件 {file_name} 成功加载并入库！")
+
             except Exception as e:
-                logger.error(f"[向量存储]加载文件{path}时发生错误: {str(e)}",exc_info=True)
+                logger.error(f"[向量存储] 加载文件 {path} 时发生错误: {str(e)}", exc_info=True)
+                # 记录失败状态到数据库
+                add_document_record(file_name, md5_hex, status="failed")
                 continue
+
+
+    def load_single_document(self, file_path: str) -> bool:
+        """
+        专门用于处理单个上传文件的加载、切片和向量化
+        """
+        def get_file_document(read_path: str):
+            if read_path.endswith(".pdf"):
+                from agent_project.utils.file_handler import pdf_loader
+                return pdf_loader(read_path)
+            elif read_path.endswith(".txt"):
+                from agent_project.utils.file_handler import txt_loader
+                return txt_loader(read_path)
+            return []
+
+        try:
+            documents = get_file_document(file_path)
+            if not documents:
+                logger.warning(f"[向量存储] 单文件 {file_path} 不存在有效内容")
+                return False
+
+            split_document = self.splitter.split_documents(documents)
+            if not split_document:
+                logger.warning(f"[向量存储] 单文件 {file_path} 分割后无有效文本块")
+                return False
+
+            # 关键：确保分块的 metadata 中包含 source（文件路径），这样以后我们才能根据路径删除它们
+            for doc in split_document:
+                doc.metadata["source"] = file_path
+
+            self.vector_store.add_documents(split_document)
+            logger.info(f"[向量存储] 单文件 {file_path} 成功加载并入库！")
+            return True
+
+        except Exception as e:
+            logger.error(f"[向量存储] 加载单文件 {file_path} 时发生错误: {str(e)}", exc_info=True)
+            return False
 
 if __name__ == '__main__':
     vs = VectorStoreService()
