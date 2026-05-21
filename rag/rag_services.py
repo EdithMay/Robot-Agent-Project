@@ -1,9 +1,4 @@
-'''
-RAG总结服务:
-1.用户提问
-2.搜索参考资料
-2.将提问和参考资料提交给模型。进行总结回复
-'''
+
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 
