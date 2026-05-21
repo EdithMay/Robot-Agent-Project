@@ -18,26 +18,18 @@ from agent_project.utils.path_tool import get_abs_path
 
 def load_rag_config(config:str = get_abs_path("config/rag.yml"),encoding:str = "utf-8"):
     with open(config, "r", encoding=encoding) as f:
-        #yaml.load()函数用于从文件中加载 YAML 数据，并将其转换为 Python 对象。
-        # Loader=yaml.FullLoader 参数指定使用 FullLoader 来解析 YAML 数据，这是一种安全的加载器，可以防止执行任意代码。
         return yaml.load(f, Loader=yaml.FullLoader)
 
 def load_chroma_config(config:str = get_abs_path("config/chroma.yml"),encoding:str = "utf-8"):
     with open(config, "r", encoding=encoding) as f:
-        #yaml.load()函数用于从文件中加载 YAML 数据，并将其转换为 Python 对象。
-        # Loader=yaml.FullLoader 参数指定使用 FullLoader 来解析 YAML 数据，这是一种安全的加载器，可以防止执行任意代码。
         return yaml.load(f, Loader=yaml.FullLoader)
 
 def load_prompts_config(config:str = get_abs_path("config/prompts.yml"),encoding:str = "utf-8"):
     with open(config, "r", encoding=encoding) as f:
-        #yaml.load()函数用于从文件中加载 YAML 数据，并将其转换为 Python 对象。
-        # Loader=yaml.FullLoader 参数指定使用 FullLoader 来解析 YAML 数据，这是一种安全的加载器，可以防止执行任意代码。
         return yaml.load(f, Loader=yaml.FullLoader)
 
 def load_agent_config(config:str = get_abs_path("config/agent.yml"),encoding:str = "utf-8"):
     with open(config, "r", encoding=encoding) as f:
-        #yaml.load()函数用于从文件中加载 YAML 数据，并将其转换为 Python 对象。
-        # Loader=yaml.FullLoader 参数指定使用 FullLoader 来解析 YAML 数据，这是一种安全的加载器，可以防止执行任意代码。
         return yaml.load(f, Loader=yaml.FullLoader)
 
 rag_conf = load_rag_config()
