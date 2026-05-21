@@ -1,0 +1,98 @@
+# api.py
+import json
+from fastapi import FastAPI
+import os
+import sys
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from typing import List, Dict
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 导入你的 Agent
+from agent_project.utils.mysql_handler import clear_history_from_db
+from agent.react_agent import ReactAgent
+from agent_project.service.knowledge_service import KnowledgeService
+#uvicorn api:app --reload
+app = FastAPI(title="扫地机器人智能体 API")
+knowledge_service = KnowledgeService()
+
+print("正在初始化底层的 ReactAgent...")
+agent = ReactAgent()
+print("Agent 初始化完成，服务已启动！")
+
+# 定义前端传过来的请求体格式
+class ChatRequest(BaseModel):
+    messages: List[Dict[str, str]]
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    def generate():
+        try:
+            # 调用 Agent 的流式输出
+            for chunk in agent.execute_stream(request.messages):
+
+                yield json.dumps({"content": chunk}, ensure_ascii=False) + "\n"
+        except Exception as e:
+            yield json.dumps({"error": str(e)}, ensure_ascii=False) + "\n"
+
+    # 返回 Server-Sent Events (SSE) 类似的流式响应
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+# 定义请求模型
+class ClearRequest(BaseModel):
+    session_id: str
+
+@app.post("/chat/clear")
+async def clear_chat(request: ClearRequest):
+    try:
+        # 调用上面写的数据库清除函数
+
+        clear_history_from_db(request.session_id)
+        return {"status": "success", "message": f"Session {request.session_id} cleared"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/knowledge/upload")
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """
+    接收文件上传，并交给 Service 在后台处理
+    """
+
+    content = await file.read()
+
+
+    background_tasks.add_task(knowledge_service.process_new_upload, file.filename, content)
+
+    return {"message": f"文件 {file.filename} 已成功上传，系统正在后台进行知识库构建。"}
+
+
+@app.get("/knowledge/list")
+async def list_files():
+    """
+    获取知识库文件列表
+    """
+    docs = knowledge_service.get_document_list()
+    return {"data": docs}
+
+
+class DeleteRequest(BaseModel):
+    file_name: str
+    md5_hash: str
+
+
+@app.delete("/knowledge/delete")
+async def delete_file(req: DeleteRequest):
+    """
+    删除指定的知识库文件
+    """
+    success = knowledge_service.delete_document(req.file_name, req.md5_hash)
+    if success:
+        return {"message": "删除成功"}
+    return {"message": "删除失败，请查看后台日志"}
+
+# 如果需要直接运行测试，可以加上这段
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
