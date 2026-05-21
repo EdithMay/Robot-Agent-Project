@@ -1,7 +1,7 @@
 '''
 从配置文件（YAML 格式的 .yml）里读取配置，
 并返回 Python 对象
-类似于⬇️
+类似于
 model:
   provider: ollama
   name: qwen2.5:7b
