@@ -1,0 +1,142 @@
+# admin_app.py
+import streamlit as st
+import requests
+import time
+# ==========================================
+# 页面配置
+# ==========================================
+st.set_page_config(page_title=" 智能体知识库管理后台", page_icon="🛠️", layout="wide")
+
+st.title(" 扫地机器人 - 知识库管理中心")
+st.markdown("这里是管理员专属后台。您上传的文档将在后台自动进行向量化，并供大模型检索使用。普通用户无法访问此页面。")
+
+# 后端 API 地址配置 (FastAPI 默认端口)
+API_BASE_URL = "http://127.0.0.1:8000"
+
+# ==========================================
+# 模块 1：文件上传区
+# ==========================================
+st.header("上传新文档")
+with st.container(border=True):
+    uploaded_file = st.file_uploader("支持 PDF / TXT 格式", type=["pdf", "txt"])
+
+    if uploaded_file is not None:
+        if st.button("开始解析并构建知识库", type="primary"):
+
+            # 1. 先发送上传请求
+            with st.spinner('正在上传文件到服务器...'):
+                try:
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                    res = requests.post(f"{API_BASE_URL}/knowledge/upload", files=files)
+                    upload_success = res.status_code == 200
+                except Exception as e:
+                    st.error(f"请求后端 API 时发生错误: {e}")
+                    upload_success = False
+
+            # 2. 如果上传成功，开始轮询等待后台处理结果
+            if upload_success:
+                st.toast("文件已接收，开始后台向量化...", icon="⏳")
+
+                # 创建一个新的占位符用于显示动态状态
+                status_placeholder = st.empty()
+                is_processed = False
+                is_failed = False
+
+                # 轮询 60 次，每次间隔 2 秒（最多等待 120 秒）
+                for i in range(60):
+                    status_placeholder.info(f"后台正在进行文本切片与向量化，请勿刷新页面... (已等待 {i * 2} 秒)")
+
+                    try:
+                        # 悄悄请求列表接口，查看当前文件的状态
+                        list_res = requests.get(f"{API_BASE_URL}/knowledge/list")
+                        if list_res.status_code == 200:
+                            docs = list_res.json().get("data", [])
+                            # 在数据库列表中寻找刚刚上传的文件
+                            for doc in docs:
+                                if doc['file_name'] == uploaded_file.name:
+                                    if doc['status'] == 'processed':
+                                        is_processed = True
+                                        break
+                                    elif doc['status'] == 'failed':
+                                        is_failed = True
+                                        break
+
+                        if is_processed or is_failed:
+                            break  # 状态发生改变，跳出循环
+
+                    except Exception:
+                        pass  # 忽略轮询过程中的偶发网络错误
+
+                    time.sleep(2)  # 暂停 2 秒后再次查询
+
+                # 3. 根据轮询结果更新 UI
+                status_placeholder.empty()  # 清空进度提示
+
+                if is_processed:
+                    st.success(f"🎉 文件 {uploaded_file.name} 向量化完成，已成功入库！")
+                    time.sleep(1.5)
+                    st.rerun()  # 强制刷新整个页面，底部的列表会自动更新出新文件
+                elif is_failed:
+                    st.error(f"❌ 文件 {uploaded_file.name} 后台解析失败，请检查后端日志。")
+                else:
+                    st.warning(
+                        "文件较大，处理时间超过2分钟。系统仍在后台静默处理，您可以稍后手动点击底部的【刷新列表】查看。")
+
+st.divider()
+
+
+st.header("📚 现有知识库文件")
+
+
+col1, col2 = st.columns([8, 2])
+with col2:
+    if st.button("🔄 刷新列表", use_container_width=True):
+        st.rerun()
+
+try:
+    # 获取后端文件列表
+    res = requests.get(f"{API_BASE_URL}/knowledge/list")
+    if res.status_code == 200:
+        docs = res.json().get("data", [])
+
+        if not docs:
+            st.info("当前知识库为空，请在上方上传文档。")
+        else:
+  
+            header_cols = st.columns([3, 3, 2, 2])
+            header_cols[0].markdown("**文件名**")
+            header_cols[1].markdown("**MD5 校验值**")
+            header_cols[2].markdown("**入库时间**")
+            header_cols[3].markdown("**操作**")
+            st.markdown("---")
+
+ 
+            for doc in docs:
+                cols = st.columns([3, 3, 2, 2])
+                cols[0].write(doc['file_name'])
+
+                cols[1].caption(doc['md5_hash'])
+
+                status_emoji = "✅" if doc['status'] == "processed" else "❌"
+                cols[2].write(f"{status_emoji} {doc['created_at']}")
+
+     
+                with cols[3]:
+
+                    if st.button("🗑 删除", key=f"del_{doc['md5_hash']}", type="secondary"):
+                        del_res = requests.request(
+                            "DELETE",
+                            f"{API_BASE_URL}/knowledge/delete",
+                            json={"file_name": doc['file_name'], "md5_hash": doc['md5_hash']}
+                        )
+                        if del_res.status_code == 200:
+                            st.toast(f"已成功删除 {doc['file_name']}", icon="✅")
+                            st.rerun()  # 刷新页面更新列表
+                        else:
+                            st.error("删除失败，请检查后端日志。")
+    else:
+        st.error(f"获取知识库列表失败，状态码: {res.status_code}")
+except requests.exceptions.ConnectionError:
+    st.error("无法连接到后端服务，请确认 FastAPI (8000端口) 已启动。")
+except Exception as e:
+    st.error(f"无法获取列表: {e}")
